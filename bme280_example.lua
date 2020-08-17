@@ -1,7 +1,7 @@
 local ssid = "YOUR_SSID"
 local pwd = "YOUR_PASSWORD"
 local omloxhost = "OMLOX_HUB_HOSTNAME"
-local omloxport = "8081" // OMLOX_HUB_PORT
+local omloxport = "8081"
 
 local websocketregister={jsonrpc="2.0", method="register", params={ method="getTemperature"}}
 local tempresult={jsonrpc="2.0", result={ temperature=0 }}
