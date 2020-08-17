@@ -104,7 +104,6 @@ function initRPC(ws)
         decoder:write(msg)
         local decoderresult=decoder:result()
         for i,v in pairs(methodCallbackTable) do
-            print(i)
             if v.id==decoderresult.id then
                 if decoderresult.result==true then
                     print("\n\tRPC - REGISTERED " .. i)
