@@ -3,76 +3,31 @@ local pwd = "YOUR_PASSWORD"
 local omloxhost = "OMLOX_HUB_HOSTNAME"
 local omloxport = "8081"
 
-local websocketregister={jsonrpc="2.0", method="register", params={ method="getTemperature"}}
-local tempresult={jsonrpc="2.0", result={ temperature=0 }}
+local methodCallbackTable={}
 local id=0
-local register=false
-gpio.write(0, gpio.LOW)
-local ws=websocket.createClient()
-ws:on("connection", function(ws)
+
+local socket=websocket.createClient()
+
+socket:on("connection", function(socket)
     print("\n\tRPC - CONNECTED")
-    local data
-    local concat=""
-    id=id+1
-    websocketregister.id=id
-    local encoder = sjson.encoder(websocketregister)
-    
-    while true do
-        data = encoder:read(64)
-        if not data then
-            break
-        end
-        concat=concat..data
-    end
-    print("\n\tRPC - SENT MESSAGE\n\tMESSAGE: ".. concat)
-    ws:send(concat)
+    initRPC(socket)
+    registerFunction(socket, "getTemperature", function() return {temperature=bme280.temp()/100} end)
+    sensorsetup()
 end)
-ws:on("close", function(ws)
+socket:on("close", function(socket)
     print("\n\tRPC - CONNECTION CLOSED")
     local timer = tmr.create()
     timer:register(5000,tmr.ALARM_SINGLE, function()
-        ws:connect('ws://' .. omloxhost .. ':' .. omloxport .. '/v1/ws/rpc')
+        socket:connect('ws://' .. omloxhost .. ':' .. omloxport .. '/v1/ws/rpc')
     end)
     timer:start()
-end)
-ws:on("receive", function(_, msg, opcode)
-    print("\n\tRPC - GOT MESSAGE\n\tMESSAGE: " .. msg .. "\n\tOP-CODE: " .. opcode)
-    local decoder=sjson.decoder()
-    decoder:write(msg)
-    local decoderresult=decoder:result()
-    if decoderresult.id==id then
-        if decoderresult.result==true then
-            print("\n\tRPC - REGISTERED getTemperature ")
-            register=true
-            sensorsetup()
-        else
-            print("\n\tRPC - REGISTRATION FAILED")
-        end
-    elseif register==true then
-        if decoderresult.method=="getTemperature" then
-            local data
-            local concat=""
-            tempresult.id=decoderresult.id
-            tempresult.result.temperature=bme280.temp()/100
-            local encoder = sjson.encoder(tempresult)
-            while true do
-                data = encoder:read(64)
-                if not data then
-                    break
-                end
-                concat=concat..data
-            end
-            print("\n\tRPC - SENT MESSAGE\n\tMESSAGE: ".. concat)
-            ws:send(concat)
-        end
-    end
 end)
 
 
  wifi.eventmon.register(wifi.eventmon.STA_CONNECTED, function(T)
  print("\n\tSTA - CONNECTED".."\n\tSSID: "..T.SSID.."\n\tBSSID: "..
  T.BSSID.."\n\tChannel: "..T.channel)
-    ws:connect('ws://***REMOVED***:8081/v1/ws/rpc')
+    socket:connect('ws://' .. omloxhost .. ':' .. omloxport .. '/v1/ws/rpc')
  end)
 
  wifi.eventmon.register(wifi.eventmon.STA_DISCONNECTED, function(T)
@@ -112,15 +67,68 @@ end)
  end)
 
 wifi.setmode(wifi.STATION)
---wifi.sta.config("SSID","password")
 wifi.sta.config {ssid=ssid, pwd=pwd}
 
 
 
  function sensorsetup()
-    gpio.write(0, gpio.HIGH)
     i2c.setup(0, 2, 1, i2c.SLOW)
     bme280.setup()
-
  end
 
+ function registerFunction(ws, method, callback)
+    id=id+1
+    local websocketregister={jsonrpc="2.0", id=id, method="register", params={ method=method}}
+    methodCallbackTable[method] = { callback=callback, id=id }
+    local data
+    local concat=""
+    local encoder = sjson.encoder(websocketregister)
+    
+    while true do
+        data = encoder:read(64)
+        if not data then
+            break
+        end
+        concat=concat..data
+    end
+    ws:send(concat)
+    print("\n\tRPC - SENT MESSAGE\n\tMESSAGE: ".. concat)
+    
+ end
+ 
+function initRPC(ws)
+    local result={jsonrpc="2.0", result=nil}
+    ws:on("receive", function(_, msg, opcode)
+        print("\n\tRPC - GOT MESSAGE\n\tMESSAGE: " .. msg .. "\n\tOP-CODE: " .. opcode)
+        local decoder=sjson.decoder()
+        decoder:write(msg)
+        local decoderresult=decoder:result()
+        for i,v in pairs(methodCallbackTable) do
+            print(i)
+            if v.id==decoderresult.id then
+                if decoderresult.result==true then
+                    print("\n\tRPC - REGISTERED " .. i)
+                else
+                    print("\n\tRPC - REGISTRATION FAILED")
+                end
+            end
+        end
+        if methodCallbackTable[decoderresult.method]~=nil then
+            local data
+            local concat=""
+            result.id=decoderresult.id
+            result.result=methodCallbackTable[decoderresult.method].callback()
+            local encoder = sjson.encoder(result)
+            while true do
+                data = encoder:read(64)
+                if not data then
+                    break
+                end
+                concat=concat..data
+            end
+            print("\n\tRPC - SENT MESSAGE\n\tMESSAGE: ".. concat)
+            ws:send(concat)
+        
+        end
+    end)
+end
